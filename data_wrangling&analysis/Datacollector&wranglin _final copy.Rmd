@@ -1,0 +1,158 @@
+---
+title: "Data_collector & Wranglin"
+author: "Santiago"
+date: "4/24/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(keyring)
+library(fredr)
+library(lubridate)
+library(tidyverse)
+library(tidymodels)
+library(parsnip)
+library(discrim)
+```
+
+#Data
+
+```{r}
+read_csv("data_bundle5df.csv")->data
+
+data
+
+data %>% 
+  rename(zhvi=dataValue,
+         dist = Dist) %>% 
+  mutate(dist = as.factor(dist),
+         confirmed = case_when(is.na(confirmed)~0,
+                               is.numeric(confirmed)~confirmed))->data0
+
+data0
+
+data0 %>% 
+  arrange(zip,date) %>% 
+relocate(c(zip,date,zhvi,regionCity))%>%
+  select(-density, -population)->data1
+  
+#Creating a subset of n's by zip code
+for (i in 1:nrow(data1)) {
+  if  (i == 1){
+    n <- 1
+  }
+  else if (data1[["zip"]][i]  != data1[["zip"]][i-1]) {
+    n <- 1
+  } else  {
+    n <- n+1
+  }
+  data1[["row_zip"]][i] <- n
+}
+
+
+
+#Creating a variable that states if the price increased in the mean sales house price the following year
+for (i in 1:nrow(data1)) {
+  if (i == nrow(data1)){
+    data1[["price_increase"]][i] <- NA
+  } else if (data1[["row_zip"]][i+1] == 1){
+    data1[["price_increase"]][i] <- NA
+  } else {
+    if (data1[["zhvi"]][i] < data1[["zhvi"]][i+1]) {
+      data1[["price_increase"]][i] <- "Yes"
+    } else {
+      data1[["price_increase"]][i] <- "No"
+    }
+  }
+}
+
+
+data1 %>% relocate(price_increase)
+
+#Creating a tibble for the mean GDP in each state as economic variables are based by state
+data1%>%
+  group_by(state)%>%
+  summarise(meanGDP = mean(new_gdp, na.rm = TRUE)) -> 
+  MeanGDP
+
+MeanGDP <- na.omit(MeanGDP)
+
+#Making the state of the mean GDP the row  name for indexing purposes
+MeanGDP%>% 
+  remove_rownames%>% 
+  column_to_rownames(var="state")->
+  MeanGDP
+
+# Setting new_gdp equal to the mean GDP of each state  if new_gdp is  NA or 0
+for (i in 1:nrow(data1)) {
+  if ((data1[["new_gdp"]][i] == 0)||(is.na(data1[["new_gdp"]][i]))){
+    data1[["new_gdp"]][i] <- MeanGDP[data1[["state"]][i], ]
+  }
+}
+
+#Separating the last row by zip code to  make predictions with as we do not have  the following date's mean housing price to know if it increased from the last row to the row that we do not have.
+data1%>%
+  filter(is.na(price_increase))->
+  prediction_set_data1
+
+prediction_set_data1 <- na.omit(prediction_set_data1)
+#Grabbing the rows for which we do know if the mean housing price increases for the following date
+data1%>%
+  filter(!is.na(price_increase))->
+  data1
+
+data1 <- na.omit(data1)
+
+#Making the variable price_increase a factor variable
+data1[["price_increase"]] <- as.factor(data1[["price_increase"]])
+
+skim(data1)
+
+data1%>%
+  select(-row_zip, -state, -date2)->
+  data1
+```
+
+
+```{r}
+data1 %>% select(zhvi,new_gdp,cpi,ur, confirmed)->numeric_predss
+
+cor(numeric_predss)
+
+```
+
+```{r}
+set.seed(1234)
+sample(data1$zip, size=10)
+
+data1 %>% 
+  filter(zip %in% c(46142, 33137, 75206, 89015, 76011, 60712, 20852,  2189)) %>% 
+  ggplot(aes(x=log(new_gdp),y=cpi  ,color=as.numeric(price_increase)))+
+  geom_point()+
+  facet_wrap(~zip)+
+  scale_color_viridis_c()
+
+data1 %>% 
+  filter(zip %in% c(46142, 33137, 75206, 89015, 76011, 60712, 20852,  2189)) %>% 
+  ggplot(aes(x=log(cpi),y=zhvi  ,color=as.numeric(price_increase)))+
+  geom_point()+
+  facet_wrap(~zip)+
+  scale_color_viridis_c()
+
+count(data1 %>% distinct(zip))
+
+```
+```{r}
+plot(data1$confirmed)
+plot(data1$ur)
+plot(data1$zhvi)
+plot(data1$new_gdp)
+
+```
+
+
